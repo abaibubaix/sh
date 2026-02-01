@@ -5,7 +5,7 @@ AGENT_BIN="/usr/local/bin/flux-agent"
 STATIC_BASE="https://panel-static.199028.xyz/network-panel"
 GITHUB_DL_BASE="https://github.com/NiuStar/network-panel/releases/latest/download"
 # GOST 最新版本 API（已改为镜像加速）
-BASE_GOST_REPO_API="https://mirror.moeyy.cn/https://api.github.com/repos/go-gost/gost/releases/latest"
+BASE_GOST_REPO_API="https://gh-proxy.org/https://api.github.com/repos/go-gost/gost/releases/latest"
 PROXY_PREFIX=""
 # 下载源模式：global(默认) | cn | static | github | auto(等价于 global)
 SOURCE_MODE="global"
