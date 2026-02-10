@@ -37,7 +37,7 @@ m1_install_xray() {
     
     # === 检测是否已安装 ===
     if [[ -f "$BIN_PATH" ]]; then
-        echo -e "${C_YELLOW}检测到 Socks5 已安装，跳过下载步骤。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 Socks5 已安装，跳过安装步骤。${C_RESET}"
         return 0
     fi
     # ====================
@@ -100,8 +100,6 @@ m1_config_xray() {
     local IPV4_LIST=()
     local IPV6_LIST=()
     
-    echo "正在检测公网 IP (可能需要几秒钟)..."
-    
     # IPv4 检测逻辑
     while read ip; do
         [[ "$ip" =~ ^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168|127\.) ]] && continue
@@ -129,7 +127,7 @@ m1_config_xray() {
     mkdir -p "$CONFIG_DIR"
     
     echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
-    echo -e "${C_YELLOW}端口：$START_PORT，用户：$USER，密码：$PASS${C_RESET}"
+    echo "起始端口：$START_PORT 用户：$USER 密码：$PASS"
 
     local config_content=""
     local index=0
@@ -235,7 +233,7 @@ m2_install_xray() {
     
     # === 检测是否已安装 ===
     if [[ -f "$xray_binary_path" ]]; then
-        echo -e "${C_YELLOW}检测到 VLESS-Enc (Xray) 已安装，跳过下载步骤。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 VLESS-Enc 已安装，跳过安装步骤。${C_RESET}"
     else
         m2_log_info "安装 Xray VLESS-Enc..."
         # 1. 安装核心
@@ -370,7 +368,7 @@ m3_install_ss() {
     
     # === 检测是否已安装 ===
     if [[ -f "$BINARY_PATH" ]]; then
-        echo -e "${C_YELLOW}检测到 SS-Rust 已安装，跳过下载和安装。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 SS-2022 已安装，跳过安装步骤。${C_RESET}"
         m3_view_config
         return 0
     fi
@@ -462,7 +460,8 @@ m3_view_config() {
     local link_str="${method}:${password}"
     local base64_str=$(echo -n "$link_str" | base64 -w 0)
     local link="ss://${base64_str}@${ip}:${port}#SS-2022"
-    
+    echo "默认端口: $port"
+    echo "默认密码: $password"
     echo -e "\n${C_GREEN}=== SS-2022 节点链接 ===${C_RESET}"
     echo "$link"
     echo -e "${C_GREEN}========================${C_RESET}"
