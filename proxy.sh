@@ -76,7 +76,7 @@ EOF
     systemctl start xrayL.service
 
     rm -f Xray-linux-64.zip
-    echo "Socks5 安装完成."
+#    echo "Socks5 安装完成."
 }
 
 m1_uninstall_xray() {
