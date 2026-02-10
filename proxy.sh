@@ -12,6 +12,9 @@ C_YELLOW='\033[1;33m'
 C_BLUE='\033[0;34m'
 C_CYAN='\033[0;36m'
 
+# [新增] 全局变量：控制命令行模式
+CLI_MODE=0
+
 # 全局工具函数
 check_root() {
     if [[ "$EUID" -ne 0 ]]; then
@@ -21,6 +24,8 @@ check_root() {
 }
 
 pause_key() {
+    # [新增] 命令行模式跳过暂停
+    if [[ "$CLI_MODE" -eq 1 ]]; then return; fi
     echo
     read -n 1 -s -r -p "按任意键继续..."
     echo
@@ -99,6 +104,7 @@ m1_config_xray() {
     # 重新获取IP列表
     local IPV4_LIST=()
     local IPV6_LIST=()
+
     
     # IPv4 检测逻辑
     while read ip; do
@@ -125,9 +131,9 @@ m1_config_xray() {
     IPV6_LIST=($(printf "%s\n" "${IPV6_LIST[@]}" | sort -u))
 
     mkdir -p "$CONFIG_DIR"
-    
+    echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"   
     echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
-    echo "起始端口：$START_PORT 用户：$USER 密码：$PASS"
+    echo -e "${C_YELLOW}起始端口：$START_PORT 用户：$USER 密码：$PASS${C_RESET}"
 
     local config_content=""
     local index=0
@@ -141,7 +147,6 @@ m1_config_xray() {
 
     echo -e "$config_content" > "$CONFIG_DIR/config.toml"
     systemctl restart xrayL.service
-    echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"
     echo -e "\n${C_GREEN}=== Socks5 节点链接 ===${C_RESET}"
     index=0
     for ip in "${all_ips[@]}"; do
@@ -153,7 +158,7 @@ m1_config_xray() {
             printf "socks5://%s:%s@%s:%s\n" "$USER" "$PASS" "$ip" "$PORT"
         fi
     done
-    echo -e "${C_GREEN}========================${C_RESET}"
+    echo -e "${C_GREEN}=============================${C_RESET}"
 }
 
 module_socks5_menu() {
@@ -235,7 +240,7 @@ m2_install_xray() {
     if [[ -f "$xray_binary_path" ]]; then
         echo -e "${C_YELLOW}检测到 VLESS-Enc 已安装，跳过安装步骤。${C_RESET}"
     else
-        m2_log_info "安装 Xray VLESS-Enc..."
+        m2_log_info "安装 VLESS-Enc..."
         # 1. 安装核心
         if ! m2_execute_official_script "install"; then
              m2_log_error "核心安装失败"
@@ -250,8 +255,6 @@ m2_install_xray() {
         m2_log_error "当前 Xray 版本不支持 VLESS Encryption，请尝试更新。"
         return 1
     fi
-
-    echo "默认端口: $port"
 
     local uuid=$($xray_binary_path uuid)
     local vlessenc_output=$($xray_binary_path vlessenc)
@@ -299,9 +302,10 @@ EOF
     chmod 644 "$xray_config_path"
     
     if m2_restart_xray; then
-	    echo -e "${C_GREEN}[✔] VLESS-Enc 安装完成！${C_RESET}"
         local ip=$(m2_get_public_ip)
         local link="vless://${uuid}@${ip}:${port}?encryption=${encryption_config}&flow=xtls-rprx-vision&type=tcp&security=none#VLESS-Enc"
+	    echo -e "${C_GREEN}[✔] VLESS-Enc 安装完成！${C_RESET}"
+		echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
         echo -e "\n${C_GREEN}=== VLESS-Enc 节点链接 ===${C_RESET}"
         echo "$link"
         echo "$link" > ~/xray_vless_link.txt
@@ -311,7 +315,7 @@ EOF
 }
 
 m2_uninstall_xray() {
-    echo "正在卸载 Xray VLESS..."
+    echo "正在卸载 VLESS-Enc..."
     m2_execute_official_script "remove --purge"
     rm -f ~/xray_vless_link.txt ~/xray_encryption_info.txt
     m2_log_success "卸载完成"
@@ -442,7 +446,7 @@ EOF
     systemctl enable ss-rust
     systemctl start ss-rust
     
-    echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
+
     m3_view_config
 }
 
@@ -460,11 +464,12 @@ m3_view_config() {
     local link_str="${method}:${password}"
     local base64_str=$(echo -n "$link_str" | base64 -w 0)
     local link="ss://${base64_str}@${ip}:${port}#SS-2022"
-    echo "默认端口: $port"
-    echo "默认密码: $password"
+    echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
+	echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
+	echo -e "${C_YELLOW}默认密码: $password${C_RESET}"
     echo -e "\n${C_GREEN}=== SS-2022 节点链接 ===${C_RESET}"
     echo "$link"
-    echo -e "${C_GREEN}========================${C_RESET}"
+    echo -e "${C_GREEN}====================${C_RESET}"
 }
 
 m3_uninstall_ss() {
@@ -514,7 +519,6 @@ install_all_services() {
     
     echo -e "\n${C_CYAN}[1/3] 检测 Socks5...${C_RESET}"
     m1_install_xray
-    # Socks5 配置比较特殊，安装函数只负责下载，必须运行配置函数来更新 IP
     m1_config_xray
     
     echo -e "\n${C_CYAN}[2/3] 检测 VLESS-Enc...${C_RESET}"
@@ -533,32 +537,52 @@ install_all_services() {
 
 uninstall_all() {
     echo -e "${C_RED}警告: 即将卸载所有模块 (Socks5, VLESS, SS-Rust)!${C_RESET}"
-    read -p "确定继续吗? (y/n): " confirm
-    if [[ "$confirm" == "y" ]]; then
-        # 暴力停止所有可能的服务
-        systemctl stop xrayL xray ss-rust 2>/dev/null
-        systemctl disable xrayL xray ss-rust 2>/dev/null
-        
-        rm -f /etc/systemd/system/xrayL.service
-        rm -f /etc/systemd/system/xray.service
-        rm -f /etc/systemd/system/ss-rust.service
-        systemctl daemon-reload
-        
-        rm -f /usr/local/bin/xrayL
-        rm -f /usr/local/bin/xray
-        rm -f /usr/local/bin/ss-rust
-        
-        rm -rf /etc/xrayL
-        rm -rf /usr/local/etc/xray
-        rm -rf /etc/ss-rust
-        
-        echo -e "${C_GREEN}所有组件已清理完毕。${C_RESET}"
-    else
-        echo "操作取消。"
+    
+    # [新增] 命令行模式跳过确认
+    if [[ "$CLI_MODE" -eq 0 ]]; then
+        read -p "确定继续吗? (y/n): " confirm
+        if [[ "$confirm" != "y" ]]; then
+            echo "操作取消。"
+            return
+        fi
     fi
+
+    # 暴力停止所有可能的服务
+    systemctl stop xrayL xray ss-rust 2>/dev/null
+    systemctl disable xrayL xray ss-rust 2>/dev/null
+    
+    rm -f /etc/systemd/system/xrayL.service
+    rm -f /etc/systemd/system/xray.service
+    rm -f /etc/systemd/system/ss-rust.service
+    systemctl daemon-reload
+    
+    rm -f /usr/local/bin/xrayL
+    rm -f /usr/local/bin/xray
+    rm -f /usr/local/bin/ss-rust
+    
+    rm -rf /etc/xrayL
+    rm -rf /usr/local/etc/xray
+    rm -rf /etc/ss-rust
+    
+    echo -e "${C_GREEN}所有组件已清理完毕。${C_RESET}"
 }
 
 check_root
+
+# [新增] 处理命令行参数
+if [[ -n "$1" ]]; then
+    if [[ "$1" == "--8" ]]; then
+        CLI_MODE=1
+        install_all_services
+        exit 0
+    fi
+    if [[ "$1" == "--9" ]]; then
+        CLI_MODE=1
+        uninstall_all
+        exit 0
+    fi
+fi
+
 # 安装基础依赖
 if ! command -v curl &>/dev/null || ! command -v unzip &>/dev/null || ! command -v jq &>/dev/null; then
     echo "安装基础依赖 (curl, unzip, jq)..."
