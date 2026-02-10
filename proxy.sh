@@ -410,10 +410,7 @@ m3_install_ss() {
     
     mkdir -p "$INSTALL_DIR"
     rm -rf "$TMP_DIR"
-    
-    echo "默认端口: $port"
-    echo "默认密码: $password"
-    
+
     # 写入配置 (使用 2022-blake3-aes-128-gcm)
     cat <<EOF > "$CONFIG_PATH"
 {
