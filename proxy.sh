@@ -536,7 +536,7 @@ install_all_services() {
 # ==============================================================================
 
 uninstall_all() {
-    echo -e "${C_RED}警告: 即将卸载所有模块 (Socks5, VLESS, SS-Rust)!${C_RESET}"
+    echo -e "${C_RED}警告: 即将卸载所有模块 (Socks5, VLESS-Enc, SS-2022)!${C_RESET}"
     
     # [新增] 命令行模式跳过确认
     if [[ "$CLI_MODE" -eq 0 ]]; then
