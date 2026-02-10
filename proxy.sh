@@ -37,7 +37,7 @@ m1_install_xray() {
     
     # === 检测是否已安装 ===
     if [[ -f "$BIN_PATH" ]]; then
-        echo -e "${C_YELLOW}检测到 Socks5 (XrayL) 已安装，跳过下载步骤。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 Socks5 已安装，跳过下载步骤。${C_RESET}"
         return 0
     fi
     # ====================
@@ -75,7 +75,7 @@ EOF
 }
 
 m1_uninstall_xray() {
-    echo "开始卸载 Xray (Socks5)..."
+    echo "开始卸载 Socks5..."
     systemctl stop xrayL.service 2>/dev/null
     systemctl disable xrayL.service 2>/dev/null
     rm -f "/etc/systemd/system/xrayL.service"
@@ -84,7 +84,7 @@ m1_uninstall_xray() {
     rm -f "/usr/local/bin/xrayL"
     rm -rf "/etc/xrayL"
     rm -f Xray-linux-64.zip
-    echo "Xray (Socks5) 已卸载完成"
+    echo "Socks5 已卸载完成"
 }
 
 m1_config_xray() {
@@ -229,7 +229,7 @@ m2_install_xray() {
     local xray_config_path="/usr/local/etc/xray/config.json"
     local xray_binary_path="/usr/local/bin/xray"
     
-    # --- 固定配置 ---
+    # --- 默认配置 ---
     local port=26201
     # ----------------
     
@@ -376,7 +376,7 @@ m3_install_ss() {
     fi
     # ====================
 
-    # --- 固定配置 ---
+    # --- 默认配置 ---
     local port=26202
     local password="gZl9lxHUUZiI5gakkq3pDA=="
     # ----------------
