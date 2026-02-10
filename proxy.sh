@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# 三合一代理管理脚本 (Three-in-one Proxy Manager) - v1.2 (Fixed Config)
+# 三合一代理管理脚本 (Three-in-one Proxy Manager) - v1.3 (Smart Install)
 # ==============================================================================
 
 # 全局颜色定义
@@ -35,6 +35,13 @@ m1_install_xray() {
     local CONFIG_DIR="/etc/xrayL"
     local SERVICE_FILE="/etc/systemd/system/xrayL.service"
     
+    # === 检测是否已安装 ===
+    if [[ -f "$BIN_PATH" ]]; then
+        echo -e "${C_YELLOW}检测到 Socks5 (XrayL) 已安装，跳过下载步骤。${C_RESET}"
+        return 0
+    fi
+    # ====================
+
     echo "正在安装 Socks5..."
     apt-get install -y unzip curl || yum install -y unzip curl
     
@@ -121,9 +128,8 @@ m1_config_xray() {
 
     mkdir -p "$CONFIG_DIR"
     
-    # 不再询问，直接使用默认配置
-    echo -e "${C_YELLOW}默认配置：${C_RESET}"
-    echo -e "${C_YELLOW}起始端口：$START_PORT，用户：$USER，密码：$PASS${C_RESET}"
+    echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
+    echo -e "${C_YELLOW}端口：$START_PORT，用户：$USER，密码：$PASS${C_RESET}"
 
     local config_content=""
     local index=0
@@ -137,7 +143,7 @@ m1_config_xray() {
 
     echo -e "$config_content" > "$CONFIG_DIR/config.toml"
     systemctl restart xrayL.service
-    echo -e "${C_GREEN}[✔] Socks5  安装并启动成功！${C_RESET}"
+    echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"
     echo -e "\n${C_GREEN}=== Socks5 节点链接 ===${C_RESET}"
     index=0
     for ip in "${all_ips[@]}"; do
@@ -149,11 +155,10 @@ m1_config_xray() {
             printf "socks5://%s:%s@%s:%s\n" "$USER" "$PASS" "$ip" "$PORT"
         fi
     done
-    echo -e "${C_GREEN}=============================${C_RESET}"
+    echo -e "${C_GREEN}========================${C_RESET}"
 }
 
 module_socks5_menu() {
-    local BIN_PATH="/usr/local/bin/xrayL"
     while true; do
         clear
         echo -e "${C_CYAN}=== Multi-IP Socks5 ===${C_RESET}"
@@ -165,16 +170,12 @@ module_socks5_menu() {
         read -p "请选择: " choice
         case $choice in
             1)
-                [ -x "$BIN_PATH" ] || m1_install_xray
+                m1_install_xray
                 m1_config_xray
                 pause_key
                 ;;
             2)
-                if [ ! -x "$BIN_PATH" ]; then
-                    echo "未安装，请先选择安装。"
-                else
-                    m1_config_xray
-                fi
+                m1_config_xray
                 pause_key
                 ;;
             3)
@@ -228,20 +229,25 @@ m2_install_xray() {
     local xray_config_path="/usr/local/etc/xray/config.json"
     local xray_binary_path="/usr/local/bin/xray"
     
-    # --- 默认配置 ---
+    # --- 固定配置 ---
     local port=26201
     # ----------------
-
-    m2_log_info "安装 Xray VLESS-Enc..."
     
-    # 1. 安装核心
-    if ! m2_execute_official_script "install"; then
-         m2_log_error "核心安装失败"
-         return 1
+    # === 检测是否已安装 ===
+    if [[ -f "$xray_binary_path" ]]; then
+        echo -e "${C_YELLOW}检测到 VLESS-Enc (Xray) 已安装，跳过下载步骤。${C_RESET}"
+    else
+        m2_log_info "安装 Xray VLESS-Enc..."
+        # 1. 安装核心
+        if ! m2_execute_official_script "install"; then
+             m2_log_error "核心安装失败"
+             return 1
+        fi
+        m2_execute_official_script "install-geodata"
     fi
-    m2_execute_official_script "install-geodata"
+    # ====================
 
-    # 2. 生成配置
+    # 2. 生成配置 (即使已安装，也运行一次以确保配置符合当前脚本要求)
     if ! m2_check_xray_version; then
         m2_log_error "当前 Xray 版本不支持 VLESS Encryption，请尝试更新。"
         return 1
@@ -295,10 +301,10 @@ EOF
     chmod 644 "$xray_config_path"
     
     if m2_restart_xray; then
-        m2_log_success "VLESS-Enc  安装并启动成功！"
+	    echo -e "${C_GREEN}[✔] VLESS-Enc 安装完成！${C_RESET}"
         local ip=$(m2_get_public_ip)
         local link="vless://${uuid}@${ip}:${port}?encryption=${encryption_config}&flow=xtls-rprx-vision&type=tcp&security=none#VLESS-Enc"
-        echo -e "${C_GREEN}节点链接:${C_RESET}"
+        echo -e "\n${C_GREEN}=== VLESS-Enc 节点链接 ===${C_RESET}"
         echo "$link"
         echo "$link" > ~/xray_vless_link.txt
     else
@@ -362,7 +368,15 @@ m3_install_ss() {
     local SERVICE_FILE="/etc/systemd/system/ss-rust.service"
     local TMP_DIR=$(mktemp -d)
     
-    # --- 默认配置 ---
+    # === 检测是否已安装 ===
+    if [[ -f "$BINARY_PATH" ]]; then
+        echo -e "${C_YELLOW}检测到 SS-Rust 已安装，跳过下载和安装。${C_RESET}"
+        m3_view_config
+        return 0
+    fi
+    # ====================
+
+    # --- 固定配置 ---
     local port=26202
     local password="gZl9lxHUUZiI5gakkq3pDA=="
     # ----------------
@@ -430,7 +444,7 @@ EOF
     systemctl enable ss-rust
     systemctl start ss-rust
     
-    echo -e "${C_GREEN}[✔] SS-2022  安装并启动成功！${C_RESET}"
+    echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
     m3_view_config
 }
 
@@ -451,7 +465,7 @@ m3_view_config() {
     
     echo -e "\n${C_GREEN}=== SS-2022 节点链接 ===${C_RESET}"
     echo "$link"
-    echo -e "${C_GREEN}====================${C_RESET}"
+    echo -e "${C_GREEN}========================${C_RESET}"
 }
 
 m3_uninstall_ss() {
@@ -497,19 +511,20 @@ module_ssrust_menu() {
 # ==============================================================================
 install_all_services() {
     clear
-    echo -e "${C_YELLOW}>>> 正在批量安装所有服务...${C_RESET}"
+    echo -e "${C_YELLOW}>>> 正在批量检测并安装服务...${C_RESET}"
     
-    echo -e "\n${C_CYAN}[1/3] 安装 Socks5...${C_RESET}"
-    [ -x "/usr/local/bin/xrayL" ] || m1_install_xray
+    echo -e "\n${C_CYAN}[1/3] 检测 Socks5...${C_RESET}"
+    m1_install_xray
+    # Socks5 配置比较特殊，安装函数只负责下载，必须运行配置函数来更新 IP
     m1_config_xray
     
-    echo -e "\n${C_CYAN}[2/3] 安装 VLESS-Enc...${C_RESET}"
+    echo -e "\n${C_CYAN}[2/3] 检测 VLESS-Enc...${C_RESET}"
     m2_install_xray
     
-    echo -e "\n${C_CYAN}[3/3] 安装 Shadowsocks-2022...${C_RESET}"
+    echo -e "\n${C_CYAN}[3/3] 检测 Shadowsocks-2022...${C_RESET}"
     m3_install_ss
     
-    echo -e "\n${C_GREEN}=== 所有服务安装完毕 ===${C_RESET}"
+    echo -e "\n${C_GREEN}=== 所有操作执行完毕 ===${C_RESET}"
     pause_key
 }
 
@@ -558,7 +573,7 @@ fi
 while true; do
     clear
     echo -e "${C_GREEN}==============================================${C_RESET}"
-    echo -e "${C_CYAN}三合一代理管理脚本(Three-in-one Proxy Manager)${C_RESET}"
+    echo -e "${C_CYAN}   三合一代理脚本 (Merged Script)   ${C_RESET}"
     echo -e "${C_GREEN}==============================================${C_RESET}"
     echo -e "1. ${C_YELLOW}Socks5${C_RESET}"
     echo -e "2. ${C_YELLOW}VLESS-Enc${C_RESET}"
