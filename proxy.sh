@@ -76,7 +76,7 @@ EOF
     systemctl start xrayL.service
 
     rm -f Xray-linux-64.zip
-#    echo "Socks5 安装完成."
+    echo "Socks5 安装完成."
 }
 
 m1_uninstall_xray() {
@@ -158,7 +158,6 @@ m1_config_xray() {
             printf "socks5://%s:%s@%s:%s\n" "$USER" "$PASS" "$ip" "$PORT"
         fi
     done
-    echo -e "${C_GREEN}=============================${C_RESET}"
 }
 
 module_socks5_menu() {
@@ -234,53 +233,35 @@ m2_install_xray() {
     
     # --- 默认配置 ---
     local port=26201
+    local uuid="0e092eb5-7d41-484c-9c2b-e3a754376d2f"
+    local decryption_config="mlkem768x25519plus.native.600s.6JN17BDd2jpmFfBWQ1eDVrmp3iA0yOdVx3zD7wPuQ3Y"
+    local encryption_config="mlkem768x25519plus.native.0rtt.AVkBW8-SWZDmk50sRAQ9BvrEjG3KZaYNSoK_fyMwz2M"
     # ----------------
     
     # === 检测是否已安装 ===
     if [[ -f "$xray_binary_path" ]]; then
-#        echo -e "${C_YELLOW}检测到 VLESS-Enc 已安装，跳过安装步骤。${C_RESET}"
-        :
+        echo -e "${C_YELLOW}检测到 VLESS-Enc 已安装，跳过安装步骤。${C_RESET}"
     else
-#        m2_log_info "安装 VLESS-Enc..."
+        m2_log_info "安装 VLESS-Enc..."
         # 1. 安装核心
         if ! m2_execute_official_script "install"; then
-#             m2_log_error "核心安装失败"
+             m2_log_error "核心安装失败"
              return 1
         fi
         m2_execute_official_script "install-geodata"
     fi
     # ====================
 
-    # 2. 生成配置
+    # 2. 检查版本支持
     if ! m2_check_xray_version; then
-#        m2_log_error "当前 Xray 版本不支持 VLESS Encryption，请尝试更新。"
+        m2_log_error "当前 Xray 版本不支持 VLESS Encryption，请尝试更新。"
         return 1
     fi
 
-    local uuid=$($xray_binary_path uuid)
-    local vlessenc_output=$($xray_binary_path vlessenc)
-    
-    if [[ -z "$vlessenc_output" ]]; then
-#        m2_log_error "生成加密配置失败"
-        return 1
-    fi
-    
-    local decryption_config=$(echo "$vlessenc_output" | grep '"decryption":' | head -1 | cut -d'"' -f4)
-    local encryption_config=$(echo "$vlessenc_output" | grep '"encryption":' | head -1 | cut -d'"' -f4)
-    
-    if [[ -z "$decryption_config" ]]; then
-#         m2_log_info "尝试备用解析..."
-         decryption_config=$(echo "$vlessenc_output" | jq -r .decryption 2>/dev/null)
-    fi
-
-    if [[ -z "$decryption_config" ]]; then
-#         m2_log_error "无法解析 vlessenc 输出，请确保安装了支持该特性的 Xray。"
-#         echo "$vlessenc_output"
-         return 1
-    fi
-
+    # 保存客户端需要的key
     echo "$encryption_config" > ~/xray_encryption_info.txt
 
+    # 写入配置
     mkdir -p "$(dirname "$xray_config_path")"
     cat <<EOF > "$xray_config_path"
 {
@@ -303,14 +284,13 @@ EOF
     if m2_restart_xray; then
         local ip=$(m2_get_public_ip)
         local link="vless://${uuid}@${ip}:${port}?encryption=${encryption_config}&flow=xtls-rprx-vision&type=tcp&security=none#VLESS-Enc"
-#        echo -e "${C_GREEN}[✔] VLESS-Enc 安装完成！${C_RESET}"
-#        echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
-#        echo -e "\n${C_GREEN}=== VLESS-Enc 节点链接 ===${C_RESET}"
-#        echo "$link"
+	    echo -e "${C_GREEN}[✔] VLESS-Enc 安装完成！${C_RESET}"
+		echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
+        echo -e "\n${C_GREEN}=== VLESS-Enc 节点链接 ===${C_RESET}"
+        echo "$link"
         echo "$link" > ~/xray_vless_link.txt
     else
-#        m2_log_error "启动失败，请检查日志 (journalctl -u xray)"
-        :
+        m2_log_error "启动失败，请检查日志 (journalctl -u xray)"
     fi
 }
 
@@ -466,7 +446,7 @@ m3_view_config() {
 	echo -e "${C_YELLOW}默认密码: $password${C_RESET}"
     echo -e "\n${C_GREEN}=== SS-2022 节点链接 ===${C_RESET}"
     echo "$link"
-    echo -e "${C_GREEN}====================${C_RESET}"
+
 }
 
 m3_uninstall_ss() {
@@ -514,15 +494,15 @@ install_all_services() {
     clear
     echo -e "${C_YELLOW}>>> 正在批量检测并安装服务...${C_RESET}"
     
-    echo -e "\n${C_CYAN}[1/3] 检测 Socks5...${C_RESET}"
-    m1_install_xray
-    m1_config_xray
-    
-    echo -e "\n${C_CYAN}[2/3] 检测 VLESS-Enc...${C_RESET}"
+    echo -e "\n${C_CYAN}[1/3] 检测 VLESS-Enc...${C_RESET}"
     m2_install_xray
     
-    echo -e "\n${C_CYAN}[3/3] 检测 Shadowsocks-2022...${C_RESET}"
+    echo -e "\n${C_CYAN}[2/3] 检测 Shadowsocks-2022...${C_RESET}"
     m3_install_ss
+    
+    echo -e "\n${C_CYAN}[3/3] 检测 Socks5...${C_RESET}"
+    m1_install_xray
+    m1_config_xray
     
     echo -e "\n${C_GREEN}=== 所有操作执行完毕 ===${C_RESET}"
     pause_key
@@ -595,9 +575,9 @@ while true; do
     echo -e "${C_GREEN}==============================================${C_RESET}"
     echo -e "${C_CYAN}   三合一代理脚本 (Merged Script)   ${C_RESET}"
     echo -e "${C_GREEN}==============================================${C_RESET}"
-    echo -e "1. ${C_YELLOW}Socks5${C_RESET}"
-    echo -e "2. ${C_YELLOW}VLESS-Enc${C_RESET}"
-    echo -e "3. ${C_YELLOW}Shadowsocks-2022${C_RESET}"
+    echo -e "1. ${C_YELLOW}VLESS-Enc${C_RESET}"
+    echo -e "2. ${C_YELLOW}SS-2022${C_RESET}"
+    echo -e "3. ${C_YELLOW}Socks5${C_RESET}"
     echo -e "----------------------------------------------"
     echo -e "8. ${C_GREEN}安装所有服务${C_RESET}"
     echo -e "9. ${C_RED}卸载所有服务${C_RESET}"
@@ -606,9 +586,9 @@ while true; do
     read -p "请输入选项: " main_choice
 
     case $main_choice in
-        1) module_socks5_menu ;;
-        2) module_vless_menu ;;
-        3) module_ssrust_menu ;;
+        1) module_vless_menu ;;
+        2) module_ssrust_menu ;;
+        3) module_socks5_menu ;;
         8) install_all_services ;;
         9) uninstall_all; pause_key ;;
         0) exit 0 ;;
