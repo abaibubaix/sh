@@ -168,6 +168,10 @@ EOF
         systemctl enable xray-socks5.service >/dev/null 2>&1
         
         # 显示安装信息（仅新安装）
+        echo "正在安装 Socks5..."
+        local latest_tag
+        latest_tag=$(get_xray_version)
+        echo "版本号: ${latest_tag:-Unknown}"
     fi
     # ====================
 
