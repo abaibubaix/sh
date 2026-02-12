@@ -105,7 +105,6 @@ install_xray_core() {
         return 0
     fi
     
-    echo "正在安装 Xray..."
     local xray_install_script_url="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
     local content
     content=$(curl -sL --max-time 10 "$xray_install_script_url" 2>/dev/null)
@@ -117,10 +116,6 @@ install_xray_core() {
     echo "$content" | bash -s -- install >/dev/null 2>&1
     echo "$content" | bash -s -- install-geodata >/dev/null 2>&1
     
-    # 安装完成后获取版本号
-    local latest_tag
-    latest_tag=$(get_xray_version)
-    echo "版本号: ${latest_tag:-Unknown}"
 }
 
 # ==============================================================================
