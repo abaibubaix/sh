@@ -2,6 +2,7 @@
 
 # ==============================================================================
 # 四合一代理管理脚本 (Four-in-one Proxy Manager)
+# 优化版本 - 性能提升 - 本地版本号获取
 # ==============================================================================
 
 # 全局颜色定义
@@ -14,6 +15,9 @@ C_CYAN='\033[0;36m'
 
 # 全局变量：控制命令行模式
 CLI_MODE=0
+
+# 调试模式
+DEBUG=${DEBUG:-0}
 
 # 全局工具函数
 check_root() {
@@ -31,6 +35,91 @@ pause_key() {
     echo
 }
 
+debug_log() {
+    if [[ "$DEBUG" -eq 1 ]]; then
+        echo -e "${C_CYAN}[DEBUG] $1${C_RESET}"
+    fi
+}
+
+# ==============================================================================
+# 统一公共函数 - 网络请求优化
+# ==============================================================================
+
+# 带重试的网络请求函数
+get_with_retry() {
+    local url=$1
+    local max_attempts=3
+    local attempt=1
+    local timeout=4
+    
+    debug_log "请求URL: $url"
+    
+    while [ $attempt -le $max_attempts ]; do
+        result=$(curl -4s --max-time $timeout "$url" 2>/dev/null)
+        if [ -n "$result" ]; then
+            debug_log "请求成功 (尝试 $attempt)"
+            echo "$result"
+            return 0
+        fi
+        debug_log "请求失败，重试 $attempt/$max_attempts"
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+# 统一的IPv4获取函数
+get_public_ip() {
+    local ip
+    ip=$(get_with_retry "https://api-ipv4.ip.sb/ip") && echo "$ip" && return 0
+    ip=$(get_with_retry "https://api.ipify.org") && echo "$ip" && return 0
+    echo ""
+}
+
+# IPv6获取函数
+get_public_ipv6() {
+    local ipv6
+    ipv6=$(curl -6s --max-time 4 https://api.ipify.org 2>/dev/null)
+    [ -n "$ipv6" ] && echo "$ipv6" || echo ""
+}
+
+# 获取本地Xray版本号
+get_xray_version() {
+    local xray_binary_path="/usr/local/bin/xray"
+    
+    if [[ -f "$xray_binary_path" ]]; then
+        # 优先从本地获取 - 快速且准确
+        local version
+        version=$("$xray_binary_path" -version 2>/dev/null | head -n 1)
+        if [ -n "$version" ]; then
+            echo "$version"
+            return 0
+        fi
+    fi
+    
+    # 本地获取失败，才从网络获取
+    curl -s --max-time 5 https://api.github.com/repos/XTLS/Xray-core/releases/latest 2>/dev/null | \
+    grep -o '"tag_name":"[^"]*' | cut -d '"' -f 4 | head -1
+}
+
+# 获取本地SS-Rust版本号
+get_ss_version() {
+    local ss_binary_path="/usr/local/bin/ss-rust"
+    
+    if [[ -f "$ss_binary_path" ]]; then
+        # 优先从本地获取 - 快速且准确
+        local version
+        version=$("$ss_binary_path" -v 2>/dev/null | head -n 1)
+        if [ -n "$version" ]; then
+            echo "$version"
+            return 0
+        fi
+    fi
+    
+    # 本地获取失败，才从网络获取
+    curl -s --max-time 5 https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest 2>/dev/null | \
+    grep -o '"tag_name":"[^"]*' | cut -d '"' -f 4 | head -1
+}
+
 # ==============================================================================
 # 统一 Xray 核心安装函数
 # ==============================================================================
@@ -40,22 +129,17 @@ install_xray_core() {
     
     # 已安装则不重复安装核心
     if [[ -f "$xray_binary_path" ]]; then
+        debug_log "Xray核心已存在，跳过安装"
         return 0
     fi
     
-    echo "正在安装 Xray 核心..."
     local xray_install_script_url="https://github.com/XTLS/Xray-install/raw/main/install-release.sh"
     local content
-    content=$(curl -sL "$xray_install_script_url")
+    content=$(curl -sL --max-time 10 "$xray_install_script_url" 2>/dev/null)
     if [[ -z "$content" || ! "$content" =~ "install-release" ]]; then
         echo -e "${C_RED}[✖] 无法下载 Xray 安装脚本${C_RESET}"
         return 1
     fi
-    
-    # 获取版本号
-    local latest_tag
-    latest_tag=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest 2>/dev/null | grep "tag_name" | cut -d '"' -f 4)
-    echo "版本号: ${latest_tag}"
     
     echo "$content" | bash -s -- install >/dev/null 2>&1
     echo "$content" | bash -s -- install-geodata >/dev/null 2>&1
@@ -69,7 +153,7 @@ m0_log_error() { echo -e "${C_RED}[✖] $1${C_RESET}"; }
 m0_log_success() { echo -e "${C_GREEN}[✔] $1${C_RESET}"; }
 
 m0_get_public_ip() {
-    curl -4s --max-time 4 https://api-ipv4.ip.sb/ip || curl -4s https://api.ipify.org
+    get_public_ip
 }
 
 m0_restart_xray_reality() {
@@ -131,11 +215,19 @@ m0_install_reality() {
         return 0
     fi
 
+    # 新安装：显示安装信息
+    echo "正在安装 VLESS-Reality..."
+    
     # 安装 Xray 核心
     if ! install_xray_core; then
         m0_log_error "核心安装失败"
         return 1
     fi
+    
+    # 显示版本号
+    local latest_tag
+    latest_tag=$(get_xray_version)
+    echo "版本号: ${latest_tag:-Unknown}"
 
     mkdir -p "$(dirname "$xray_config_path")"
     cat > "$xray_config_path" <<EOF
@@ -232,28 +324,33 @@ m0_uninstall_reality() {
 }
 
 # ==============================================================================
-# 模块 1: Socks5 (Xray) - 函数定义
+# 模块 1: Socks5 (Xray) - 函数定义 - 优化版
 # ==============================================================================
 
 m1_install_xray() {
     local CONFIG_DIR="/etc/xrayL"
     local SERVICE_FILE="/etc/systemd/system/xray-socks5.service"
+    local CONFIG_PATH="/usr/local/etc/xray/socks5.json"
+    
+    # --- 默认配置 ---
+    local START_PORT=20264
+    local USER="abai"
+    local PASS="abai569"
+    # ----------------
     
     # === 检测是否已安装 ===
+    local ALREADY_INSTALLED=0
     if [[ -f "$SERVICE_FILE" ]]; then
         echo -e "${C_YELLOW}检测到 Socks5 已安装，跳过安装步骤。${C_RESET}"
-        m1_config_xray
-        return 0
-    fi
-    # ====================
+        ALREADY_INSTALLED=1
+    else
+        # 新安装：安装 Xray 核心
+        if ! install_xray_core; then
+            echo -e "${C_RED}[✖] 核心安装失败${C_RESET}"
+            return 1
+        fi
 
-    # 安装 Xray 核心
-    if ! install_xray_core; then
-        echo -e "${C_RED}[✖] 核心安装失败${C_RESET}"
-        return 1
-    fi
-
-    cat <<EOF >"$SERVICE_FILE"
+        cat <<EOF >"$SERVICE_FILE"
 [Unit]
 Description=Xray Socks5 Multi-IP Service
 After=network.target
@@ -268,55 +365,43 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-    systemctl daemon-reload
-    systemctl enable xray-socks5.service >/dev/null 2>&1
-    
-    m1_config_xray
-}
+        systemctl daemon-reload
+        systemctl enable xray-socks5.service >/dev/null 2>&1
+        
+        # 显示安装信息（仅新安装）
+        echo "正在安装 Socks5..."
+        local latest_tag
+        latest_tag=$(get_xray_version)
+        echo "版本号: ${latest_tag:-Unknown}"
+    fi
+    # ====================
 
-m1_uninstall_xray() {
-    echo "开始卸载 Socks5..."
-    systemctl stop xray-socks5.service 2>/dev/null
-    systemctl disable xray-socks5.service 2>/dev/null
-    rm -f "/etc/systemd/system/xray-socks5.service"
-    systemctl daemon-reload
-    rm -f /usr/local/etc/xray/socks5.json
-    rm -rf "/etc/xrayL"
-    echo "Socks5 已卸载完成"
-}
-
-m1_config_xray() {
-    local CONFIG_PATH="/usr/local/etc/xray/socks5.json"
-    
-    # --- 默认配置 ---
-    local START_PORT=51665
-    local USER="abai"
-    local PASS="abai569"
-    # ----------------
-    
     # 重新获取IP列表
     local IPV4_LIST=()
     local IPV6_LIST=()
 
-    
-    # IPv4 检测逻辑
+    debug_log "开始检测IPv4地址..."
     while read ip; do
         [[ "$ip" =~ ^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168|127\.) ]] && continue
         if curl --interface "$ip" -s4 --max-time 3 ip.sb 2>/dev/null | grep -q "$ip"; then
             IPV4_LIST+=("$ip")
+            debug_log "检测到IPv4: $ip"
         fi
     done < <(ip -4 addr show scope global | awk '{print $2}' | cut -d/ -f1)
 
     # IPv4 NAT/Cloud
+    debug_log "检测公网IPv4..."
     local PUB_IPV4
     PUB_IPV4=$(curl -s4 --max-time 3 ip.sb 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$')
-    [ -n "$PUB_IPV4" ] && IPV4_LIST+=("$PUB_IPV4")
+    [ -n "$PUB_IPV4" ] && IPV4_LIST+=("$PUB_IPV4") && debug_log "检测到公网IPv4: $PUB_IPV4"
 
     # IPv6
+    debug_log "开始检测IPv6地址..."
     while read ip; do
         [[ "$ip" =~ ^(fd|fe80) ]] && continue
         if curl --interface "$ip" -s6 --max-time 3 ip.sb 2>/dev/null | grep -q ':'; then
             IPV6_LIST+=("$ip")
+            debug_log "检测到IPv6: $ip"
         fi
     done < <(ip -6 addr show scope global | awk '{print $2}' | cut -d/ -f1)
 
@@ -355,16 +440,17 @@ EOF
     
     systemctl restart xray-socks5.service >/dev/null 2>&1
     
-    # 检查是否新安装
+    # 显示完整信息（新安装 + 已安装都显示）
+    echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"
+    echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
+    echo "起始端口：$START_PORT 用户：$USER 密码：$PASS"
+    
     if [ ${#all_ips[@]} -gt 0 ]; then
-        echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"   
-        echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
-        echo -e "${C_YELLOW}起始端口：$START_PORT 用户：$USER 密码：$PASS${C_RESET}"
         echo -e "\n${C_GREEN}=== Socks5 节点链接 ===${C_RESET}"
-        index=0
+        local idx=0
         for ip in "${all_ips[@]}"; do
-            local PORT=$((START_PORT + index))
-            index=$((index + 1))
+            local PORT=$((START_PORT + idx))
+            idx=$((idx + 1))
             if [[ "$ip" =~ ":" ]]; then
                 printf "socks5://%s:%s@[%s]:%s\n" "$USER" "$PASS" "$ip" "$PORT"
             else
@@ -373,6 +459,17 @@ EOF
         done
         echo ""
     fi
+}
+
+m1_uninstall_xray() {
+    echo "开始卸载 Socks5..."
+    systemctl stop xray-socks5.service 2>/dev/null
+    systemctl disable xray-socks5.service 2>/dev/null
+    rm -f "/etc/systemd/system/xray-socks5.service"
+    systemctl daemon-reload
+    rm -f /usr/local/etc/xray/socks5.json
+    rm -rf "/etc/xrayL"
+    echo "Socks5 已卸载完成"
 }
 
 module_socks5_menu() {
@@ -391,7 +488,7 @@ module_socks5_menu() {
                 pause_key
                 ;;
             2)
-                m1_config_xray
+                m1_install_xray
                 pause_key
                 ;;
             3)
@@ -420,7 +517,7 @@ m2_check_xray_version() {
 }
 
 m2_get_public_ip() {
-    curl -4s --max-time 4 https://api-ipv4.ip.sb/ip || curl -4s https://api.ipify.org
+    get_public_ip
 }
 
 m2_restart_xray_vlessenc() {
@@ -478,11 +575,19 @@ m2_install_xray() {
         return 0
     fi
     
+    # 新安装：显示安装信息
+    echo "正在安装 VLESS-Enc..."
+    
     # 安装 Xray 核心
     if ! install_xray_core; then
         m2_log_error "核心安装失败"
         return 1
     fi
+
+    # 显示版本号
+    local latest_tag
+    latest_tag=$(get_xray_version)
+    echo "版本号: ${latest_tag:-Unknown}"
 
     # 检查版本支持
     if ! m2_check_xray_version; then
@@ -579,7 +684,7 @@ module_vless_menu() {
 }
 
 # ==============================================================================
-# 模块 3: Shadowsocks-Rust 2022 - 函数定义
+# 模块 3: Shadowsocks-2022 - 函数定义
 # ==============================================================================
 
 m3_install_ss() {
@@ -606,7 +711,6 @@ m3_install_ss() {
     echo "正在安装 SS-2022..."
     local latest_tag
     latest_tag=$(curl -s https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest 2>/dev/null | grep "tag_name" | cut -d '"' -f 4)
-    local version=${latest_tag#v}
     echo "版本号: ${latest_tag}"
     
     local arch
@@ -663,8 +767,19 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable ss-rust >/dev/null 2>&1
-    systemctl start ss-rust >/dev/null 2>&1
     
+    # 启动服务并检查
+    if systemctl start ss-rust >/dev/null 2>&1; then
+        if systemctl is-active --quiet ss-rust; then
+            debug_log "SS-2022 服务启动成功"
+        else
+            echo -e "${C_RED}[✖] SS-2022 服务启动失败${C_RESET}"
+            return 1
+        fi
+    else
+        echo -e "${C_RED}[✖] 无法启动 SS-2022 服务${C_RESET}"
+        return 1
+    fi
 
     m3_view_config
 }
@@ -681,7 +796,8 @@ m3_view_config() {
     password=$(grep '"password"' "$CONFIG_PATH" | cut -d'"' -f4)
     local method="2022-blake3-aes-128-gcm"
     local ip
-    ip=$(curl -s4 https://api.ipify.org 2>/dev/null)
+    ip=$(get_public_ip)
+    [ -z "$ip" ] && ip=$(curl -s4 https://api.ipify.org 2>/dev/null) || true
     
     local link_str="${method}:${password}"
     local base64_str
@@ -746,7 +862,7 @@ install_all_services() {
     m3_install_ss
     m1_install_xray
 
-    echo -e "${C_GREEN}>>> 全部完成${C_RESET}"
+    echo -e "${C_GREEN}>>> 服务全部安装${C_RESET}"
     pause_key
 }
 
