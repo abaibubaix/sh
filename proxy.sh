@@ -461,7 +461,7 @@ m1_uninstall_xray() {
     systemctl disable xray-socks5.service 2>/dev/null
     rm -f "/etc/systemd/system/xray-socks5.service"
     systemctl daemon-reload
-    rm -f /usr/local/etc/xray/socks5.json
+    rm -f "/usr/local/etc/xray/socks5.json"
     rm -rf "/etc/xrayL"
     echo "Socks5 已卸载完成"
 }
@@ -673,7 +673,7 @@ module_vless_menu() {
 }
 
 # ==============================================================================
-# 模块 3: Shadowsocks-2022 - 函数定义
+# 模块 3: Shadowsocks-2022 (Xray 核心) - 函数定义
 # ==============================================================================
 
 m3_install_ss() {
@@ -682,7 +682,7 @@ m3_install_ss() {
     
     # === 检测是否已安装 ===
     if [[ -f "$CONFIG_PATH" ]] && systemctl is-active --quiet xray-ss2022 2>/dev/null; then
-        echo -e "${C_YELLOW}检测到 SS-2022 已安装，跳过安装步骤。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 SS-2022 (Xray) 已安装，跳过安装步骤。${C_RESET}"
         m3_view_config
         return 0
     fi
@@ -694,7 +694,7 @@ m3_install_ss() {
     local method="2022-blake3-aes-128-gcm"
     # ----------------
 
-    echo "正在安装 SS-2022 ..."
+    echo "正在安装 SS-2022 (Xray 核心)..."
     
     # 安装 Xray 核心
     if ! install_xray_core; then
@@ -751,7 +751,7 @@ EOF
     
     if systemctl is-active --quiet xray-ss2022; then
         debug_log "SS-2022 服务启动成功"
-        echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
+        echo -e "${C_GREEN}[✔] SS-2022 (Xray) 安装完成！${C_RESET}"
     else
         echo -e "${C_RED}[✖] SS-2022 服务启动失败，请检查日志${C_RESET}"
         return 1
@@ -780,7 +780,7 @@ m3_view_config() {
     local link_str="${method}:${password}"
     local base64_str
     base64_str=$(echo -n "$link_str" | base64 -w 0)
-    local link="ss://${base64_str}@${ip}:${port}#SS-2022"
+    local link="ss://${base64_str}@${ip}:${port}#SS-2022-Xray"
     
     echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
     echo -e "${C_YELLOW}默认密码: $password${C_RESET}"
@@ -790,7 +790,7 @@ m3_view_config() {
 }
 
 m3_uninstall_ss() {
-    echo "卸载 SS-2022..."
+    echo "卸载 SS-2022 (Xray)..."
     systemctl stop xray-ss2022 2>/dev/null
     systemctl disable xray-ss2022 2>/dev/null
     rm -f "/etc/systemd/system/xray-ss2022.service"
@@ -901,16 +901,38 @@ check_root
 
 # 处理命令行参数
 if [[ -n "$1" ]]; then
-    if [[ "$1" == "--8" ]]; then
-        CLI_MODE=1
-        install_all_services
-        exit 0
-    fi
-    if [[ "$1" == "--9" ]]; then
-        CLI_MODE=1
-        uninstall_all
-        exit 0
-    fi
+    case "$1" in
+        --1)
+            CLI_MODE=1
+            m0_install_reality
+            exit 0
+            ;;
+        --2)
+            CLI_MODE=1
+            m2_install_xray
+            exit 0
+            ;;
+        --3)
+            CLI_MODE=1
+            m3_install_ss
+            exit 0
+            ;;
+        --4)
+            CLI_MODE=1
+            m1_install_xray
+            exit 0
+            ;;
+        --8)
+            CLI_MODE=1
+            install_all_services
+            exit 0
+            ;;
+        --9)
+            CLI_MODE=1
+            uninstall_all
+            exit 0
+            ;;
+    esac
 fi
 
 # 安装基础依赖
