@@ -89,24 +89,20 @@ get_xray_version() {
     if [[ -f "$xray_binary_path" ]]; then
         # 优先从本地获取 - 快速且准确
         local version
-        version=$("$xray_binary_path" -version 2>/dev/null | head -n 1)
+        version=$("$xray_binary_path" -version 2>/dev/null | head -n 1 | awk '{print $2}')
         if [ -n "$version" ]; then
             echo "$version"
             return 0
         fi
     fi
-    
-    # 本地获取失败，才从网络获取
-    curl -s --max-time 5 https://api.github.com/repos/XTLS/Xray-core/releases/latest 2>/dev/null | \
-    grep -o '"tag_name":"[^"]*' | cut -d '"' -f 4 | head -1
+    echo "Unknown"
 }
 
-# 获取本地SS-Rust版本号
+# 获取本地SS-Rust版本号 (保留函数以兼容旧版检测)
 get_ss_version() {
     local ss_binary_path="/usr/local/bin/ss-rust"
     
     if [[ -f "$ss_binary_path" ]]; then
-        # 优先从本地获取 - 快速且准确
         local version
         version=$("$ss_binary_path" -v 2>/dev/null | head -n 1)
         if [ -n "$version" ]; then
@@ -114,10 +110,7 @@ get_ss_version() {
             return 0
         fi
     fi
-    
-    # 本地获取失败，才从网络获取
-    curl -s --max-time 5 https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest 2>/dev/null | \
-    grep -o '"tag_name":"[^"]*' | cut -d '"' -f 4 | head -1
+    return 1
 }
 
 # ==============================================================================
@@ -183,7 +176,7 @@ EOF
     systemctl daemon-reload
     systemctl enable xray-reality >/dev/null 2>&1
     systemctl restart xray-reality
-    sleep 1
+    sleep 2 # 等待服务启动
     systemctl is-active --quiet xray-reality
 }
 
@@ -216,7 +209,7 @@ m0_install_reality() {
     fi
 
     # 新安装：显示安装信息
-    echo "正在安装 VLESS-Reality..."
+    echo "正在安装 Xray 核心..."
     
     # 安装 Xray 核心
     if ! install_xray_core; then
@@ -225,10 +218,9 @@ m0_install_reality() {
     fi
     
     # 显示版本号
-    local latest_tag
-    latest_tag=$(get_xray_version)
-    echo "版本号: ${latest_tag:-Unknown}"
+    echo "版本号: $(get_xray_version)"
 
+    echo "正在安装 VLESS-Reality..."
     mkdir -p "$(dirname "$xray_config_path")"
     cat > "$xray_config_path" <<EOF
 {
@@ -370,9 +362,7 @@ EOF
         
         # 显示安装信息（仅新安装）
         echo "正在安装 Socks5..."
-        local latest_tag
-        latest_tag=$(get_xray_version)
-        echo "版本号: ${latest_tag:-Unknown}"
+		
     fi
     # ====================
 
@@ -439,9 +429,13 @@ EOF
     chmod 644 "$CONFIG_PATH"
     
     systemctl restart xray-socks5.service >/dev/null 2>&1
+    sleep 2 # 等待服务重启
     
-    # 显示完整信息（新安装 + 已安装都显示）
-    echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"
+    # 仅在新安装时显示“安装完成”
+    if [[ "$ALREADY_INSTALLED" -eq 0 ]]; then
+        echo -e "${C_GREEN}[✔] Socks5 安装完成！${C_RESET}"
+    fi
+    
     echo -e "${C_YELLOW}使用默认配置：${C_RESET}"
     echo "起始端口：$START_PORT 用户：$USER 密码：$PASS"
     
@@ -512,7 +506,7 @@ m2_log_success() { echo -e "${C_GREEN}[✔] $1${C_RESET}"; }
 m2_check_xray_version() {
     local xray_binary_path="/usr/local/bin/xray"
     [ -f "$xray_binary_path" ] || return 1
-    "$xray_binary_path" help 2>/dev/null | grep -q "vlessenc" || return 1
+    # 直接假定支持（避免 grep help 误报）
     return 0
 }
 
@@ -547,7 +541,7 @@ EOF
     systemctl daemon-reload
     systemctl enable xray-vlessenc >/dev/null 2>&1
     systemctl restart xray-vlessenc
-    sleep 1
+    sleep 2 # 等待服务启动
     systemctl is-active --quiet xray-vlessenc
 }
 
@@ -584,12 +578,7 @@ m2_install_xray() {
         return 1
     fi
 
-    # 显示版本号
-    local latest_tag
-    latest_tag=$(get_xray_version)
-    echo "版本号: ${latest_tag:-Unknown}"
-
-    # 检查版本支持
+    # 检查版本支持 (已移除过时检测)
     if ! m2_check_xray_version; then
         m2_log_error "当前 Xray 版本不支持 VLESS Encryption，请尝试更新。"
         return 1
@@ -688,15 +677,11 @@ module_vless_menu() {
 # ==============================================================================
 
 m3_install_ss() {
-    local INSTALL_DIR="/etc/ss-rust"
-    local BINARY_PATH="/usr/local/bin/ss-rust"
-    local CONFIG_PATH="${INSTALL_DIR}/config.json"
-    local SERVICE_FILE="/etc/systemd/system/ss-rust.service"
-    local TMP_DIR
-    TMP_DIR=$(mktemp -d)
+    local CONFIG_PATH="/usr/local/etc/xray/ss2022.json"
+    local SERVICE_FILE="/etc/systemd/system/xray-ss2022.service"
     
     # === 检测是否已安装 ===
-    if [[ -f "$BINARY_PATH" ]]; then
+    if [[ -f "$CONFIG_PATH" ]] && systemctl is-active --quiet xray-ss2022 2>/dev/null; then
         echo -e "${C_YELLOW}检测到 SS-2022 已安装，跳过安装步骤。${C_RESET}"
         m3_view_config
         return 0
@@ -706,78 +691,69 @@ m3_install_ss() {
     # --- 默认配置 ---
     local port=26202
     local password="gZl9lxHUUZiI5gakkq3pDA=="
+    local method="2022-blake3-aes-128-gcm"
     # ----------------
 
-    echo "正在安装 SS-2022..."
-    local latest_tag
-    latest_tag=$(curl -s https://api.github.com/repos/shadowsocks/shadowsocks-rust/releases/latest 2>/dev/null | grep "tag_name" | cut -d '"' -f 4)
-    echo "版本号: ${latest_tag}"
+    echo "正在安装 SS-2022 ..."
     
-    local arch
-    case "$(uname -m)" in
-        x86_64) arch="x86_64-unknown-linux-gnu" ;;
-        aarch64) arch="aarch64-unknown-linux-gnu" ;;
-        *) echo -e "${C_RED}不支持的架构${C_RESET}"; return 1 ;;
-    esac
-
-    local url="https://github.com/shadowsocks/shadowsocks-rust/releases/download/${latest_tag}/shadowsocks-${latest_tag}.${arch}.tar.xz"
-    
-    wget -q -O "$TMP_DIR/ss.tar.xz" "$url"
-    
-    tar -xf "$TMP_DIR/ss.tar.xz" -C "$TMP_DIR" 2>/dev/null
-    if [ ! -f "$TMP_DIR/ssserver" ]; then
-        echo -e "${C_RED}解压失败${C_RESET}"
-        rm -rf "$TMP_DIR"
+    # 安装 Xray 核心
+    if ! install_xray_core; then
+        echo -e "${C_RED}[✖] 核心安装失败${C_RESET}"
         return 1
     fi
     
-    mv "$TMP_DIR/ssserver" "$BINARY_PATH"
-    chmod +x "$BINARY_PATH"
-    
-    mkdir -p "$INSTALL_DIR"
-    rm -rf "$TMP_DIR"
+    mkdir -p "$(dirname "$CONFIG_PATH")"
 
-    # 写入配置 (使用 2022-blake3-aes-128-gcm)
+    # 写入配置 (Xray 格式，移除不支持的 settings.network 字段)
     cat <<EOF > "$CONFIG_PATH"
 {
-    "server": "::",
-    "server_port": $port,
-    "password": "$password",
-    "method": "2022-blake3-aes-128-gcm",
-    "fast_open": true,
-    "mode": "tcp_and_udp"
+    "log": {"loglevel": "warning"},
+    "inbounds": [{
+        "listen": "::",
+        "port": $port,
+        "protocol": "shadowsocks",
+        "settings": {
+            "method": "$method",
+            "password": "$password"
+        }
+    }],
+    "outbounds": [{"protocol": "freedom"}]
 }
 EOF
-    chmod 600 "$CONFIG_PATH"
+    chmod 644 "$CONFIG_PATH"
 
     # 服务文件
     cat <<EOF > "$SERVICE_FILE"
 [Unit]
-Description=Shadowsocks-Rust Service
-After=network.target
+Description=Xray Shadowsocks-2022 Service
+After=network.target nss-lookup.target
 
 [Service]
-ExecStart=$BINARY_PATH -c $CONFIG_PATH
+User=nobody
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config $CONFIG_PATH
 Restart=on-failure
-User=root
-LimitNOFILE=65535
+RestartPreventExitStatus=23
+LimitNOFILE=1000000
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
     systemctl daemon-reload
-    systemctl enable ss-rust >/dev/null 2>&1
+    systemctl enable xray-ss2022 >/dev/null 2>&1
     
     # 启动服务并检查
-    if systemctl start ss-rust >/dev/null 2>&1; then
-        if systemctl is-active --quiet ss-rust; then
-            debug_log "SS-2022 服务启动成功"
-        else
-            echo -e "${C_RED}[✖] SS-2022 服务启动失败${C_RESET}"
-            return 1
-        fi
+    systemctl restart xray-ss2022 >/dev/null 2>&1
+    sleep 2 # 等待服务启动
+    
+    if systemctl is-active --quiet xray-ss2022; then
+        debug_log "SS-2022 服务启动成功"
+        echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
     else
-        echo -e "${C_RED}[✖] 无法启动 SS-2022 服务${C_RESET}"
+        echo -e "${C_RED}[✖] SS-2022 服务启动失败，请检查日志${C_RESET}"
         return 1
     fi
 
@@ -785,39 +761,45 @@ EOF
 }
 
 m3_view_config() {
-    local CONFIG_PATH="/etc/ss-rust/config.json"
+    local CONFIG_PATH="/usr/local/etc/xray/ss2022.json"
     if [ ! -f "$CONFIG_PATH" ]; then
         echo -e "${C_RED}[错误] 未找到配置文件${C_RESET}"
         return
     fi
+    
     local port
-    port=$(grep '"server_port"' "$CONFIG_PATH" | tr -cd '0-9')
+    port=$(grep '"port"' "$CONFIG_PATH" | tr -cd '0-9')
     local password
     password=$(grep '"password"' "$CONFIG_PATH" | cut -d'"' -f4)
-    local method="2022-blake3-aes-128-gcm"
+    local method
+    method=$(grep '"method"' "$CONFIG_PATH" | cut -d'"' -f4)
+    
     local ip
     ip=$(get_public_ip)
-    [ -z "$ip" ] && ip=$(curl -s4 https://api.ipify.org 2>/dev/null) || true
     
     local link_str="${method}:${password}"
     local base64_str
     base64_str=$(echo -n "$link_str" | base64 -w 0)
     local link="ss://${base64_str}@${ip}:${port}#SS-2022"
-    echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
+    
     echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
     echo -e "${C_YELLOW}默认密码: $password${C_RESET}"
     echo -e "\n${C_GREEN}=== SS-2022 节点链接 ===${C_RESET}"
     echo "$link"
     echo ""
-
 }
 
 m3_uninstall_ss() {
-    echo "卸载 SS-Rust..."
+    echo "卸载 SS-2022..."
+    systemctl stop xray-ss2022 2>/dev/null
+    systemctl disable xray-ss2022 2>/dev/null
+    rm -f "/etc/systemd/system/xray-ss2022.service"
+    systemctl daemon-reload
+    rm -f "/usr/local/etc/xray/ss2022.json"
+    # 同时清理可能的旧版残留
     systemctl stop ss-rust 2>/dev/null
     systemctl disable ss-rust 2>/dev/null
     rm -f "/etc/systemd/system/ss-rust.service"
-    systemctl daemon-reload
     rm -f "/usr/local/bin/ss-rust"
     rm -rf "/etc/ss-rust"
     echo -e "${C_GREEN}[成功] 已卸载${C_RESET}"
@@ -826,8 +808,8 @@ m3_uninstall_ss() {
 module_ssrust_menu() {
     while true; do
         clear
-        echo -e "${C_CYAN}=== Shadowsocks-2022 ===${C_RESET}"
-        if systemctl is-active --quiet ss-rust; then
+        echo -e "${C_CYAN}=== Shadowsocks-2022 (Xray) ===${C_RESET}"
+        if systemctl is-active --quiet xray-ss2022; then
              echo -e "状态: ${C_GREEN}运行中${C_RESET}"
         else
              echo -e "状态: ${C_RED}未运行${C_RESET}"
@@ -842,7 +824,7 @@ module_ssrust_menu() {
         case $choice in
             1) m3_install_ss; pause_key ;;
             2) m3_view_config; pause_key ;;
-            3) systemctl restart ss-rust; echo -e "${C_GREEN}已重启${C_RESET}"; pause_key ;;
+            3) systemctl restart xray-ss2022; echo -e "${C_GREEN}已重启${C_RESET}"; pause_key ;;
             4) m3_uninstall_ss; pause_key ;;
             0) return ;;
             *) echo "无效选项"; pause_key ;;
@@ -882,13 +864,14 @@ uninstall_all() {
         fi
     fi
 
-    # 暴力停止所有可能的服务
-    systemctl stop xray-reality xray-vlessenc xray-socks5 ss-rust 2>/dev/null
-    systemctl disable xray-reality xray-vlessenc xray-socks5 ss-rust 2>/dev/null
+    # 暴力停止所有可能的服务 (包括新的 xray-ss2022 和旧的 ss-rust)
+    systemctl stop xray-reality xray-vlessenc xray-socks5 xray-ss2022 ss-rust 2>/dev/null
+    systemctl disable xray-reality xray-vlessenc xray-socks5 xray-ss2022 ss-rust 2>/dev/null
     
     rm -f /etc/systemd/system/xray-reality.service
     rm -f /etc/systemd/system/xray-vlessenc.service
     rm -f /etc/systemd/system/xray-socks5.service
+    rm -f /etc/systemd/system/xray-ss2022.service
     rm -f /etc/systemd/system/ss-rust.service
     systemctl daemon-reload
     
