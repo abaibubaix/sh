@@ -42,6 +42,39 @@ debug_log() {
 }
 
 # ==============================================================================
+# 时间同步和时区设置函数
+# ==============================================================================
+
+setup_ntp_sync() {
+    echo -e "${C_BLUE}[*] 检查系统时间同步...${C_RESET}"
+    
+    # 尝试方案1：安装 systemd-timesyncd
+    if ! systemctl is-active --quiet systemd-timesyncd; then
+        echo "安装 systemd-timesyncd..."
+        apt-get update >/dev/null 2>&1
+        apt-get install -y systemd-timesyncd >/dev/null 2>&1
+        systemctl start systemd-timesyncd 2>/dev/null
+        systemctl enable systemd-timesyncd 2>/dev/null
+        sleep 2
+    fi
+    
+    # 如果 systemd-timesyncd 还是不工作，用 ntpdate 强制同步一次
+    if ! timedatectl status 2>/dev/null | grep -q "synchronized: yes"; then
+        if ! command -v ntpdate &>/dev/null; then
+            apt-get install -y ntpdate >/dev/null 2>&1
+        fi
+        ntpdate -u ntp.ubuntu.com 2>/dev/null || ntpdate -u pool.ntp.org 2>/dev/null
+    fi
+    
+    # 设置时区为上海
+    echo "设置时区为上海..."
+    timedatectl set-timezone Asia/Shanghai
+    
+    echo -e "${C_GREEN}[✔] 时间同步完成${C_RESET}"
+    timedatectl status
+}
+
+# ==============================================================================
 # 统一公共函数 - 网络请求优化
 # ==============================================================================
 
@@ -316,7 +349,7 @@ m0_uninstall_reality() {
 }
 
 # ==============================================================================
-# 模块 1: Socks5 (Xray) - 函数定义 - 优化版
+# 模块 1: Socks5 - 函数定义 - 优化版
 # ==============================================================================
 
 m1_install_xray() {
@@ -673,7 +706,7 @@ module_vless_menu() {
 }
 
 # ==============================================================================
-# 模块 3: Shadowsocks-2022 (Xray 核心) - 函数定义
+# 模块 3: Shadowsocks-2022 - 函数定义
 # ==============================================================================
 
 m3_install_ss() {
@@ -682,7 +715,7 @@ m3_install_ss() {
     
     # === 检测是否已安装 ===
     if [[ -f "$CONFIG_PATH" ]] && systemctl is-active --quiet xray-ss2022 2>/dev/null; then
-        echo -e "${C_YELLOW}检测到 SS-2022 (Xray) 已安装，跳过安装步骤。${C_RESET}"
+        echo -e "${C_YELLOW}检测到 SS-2022 已安装，跳过安装步骤。${C_RESET}"
         m3_view_config
         return 0
     fi
@@ -694,7 +727,7 @@ m3_install_ss() {
     local method="2022-blake3-aes-128-gcm"
     # ----------------
 
-    echo "正在安装 SS-2022 (Xray 核心)..."
+    echo "正在安装 SS-2022..."
     
     # 安装 Xray 核心
     if ! install_xray_core; then
@@ -751,7 +784,7 @@ EOF
     
     if systemctl is-active --quiet xray-ss2022; then
         debug_log "SS-2022 服务启动成功"
-        echo -e "${C_GREEN}[✔] SS-2022 (Xray) 安装完成！${C_RESET}"
+        echo -e "${C_GREEN}[✔] SS-2022 安装完成！${C_RESET}"
     else
         echo -e "${C_RED}[✖] SS-2022 服务启动失败，请检查日志${C_RESET}"
         return 1
@@ -780,7 +813,7 @@ m3_view_config() {
     local link_str="${method}:${password}"
     local base64_str
     base64_str=$(echo -n "$link_str" | base64 -w 0)
-    local link="ss://${base64_str}@${ip}:${port}#SS-2022-Xray"
+    local link="ss://${base64_str}@${ip}:${port}#SS-2022"
     
     echo -e "${C_YELLOW}默认端口: $port${C_RESET}"
     echo -e "${C_YELLOW}默认密码: $password${C_RESET}"
@@ -790,7 +823,7 @@ m3_view_config() {
 }
 
 m3_uninstall_ss() {
-    echo "卸载 SS-2022 (Xray)..."
+    echo "卸载 SS-2022..."
     systemctl stop xray-ss2022 2>/dev/null
     systemctl disable xray-ss2022 2>/dev/null
     rm -f "/etc/systemd/system/xray-ss2022.service"
@@ -808,7 +841,7 @@ m3_uninstall_ss() {
 module_ssrust_menu() {
     while true; do
         clear
-        echo -e "${C_CYAN}=== Shadowsocks-2022 (Xray) ===${C_RESET}"
+        echo -e "${C_CYAN}=== Shadowsocks-2022 ===${C_RESET}"
         if systemctl is-active --quiet xray-ss2022; then
              echo -e "状态: ${C_GREEN}运行中${C_RESET}"
         else
@@ -935,6 +968,9 @@ if [[ -n "$1" ]]; then
     esac
 fi
 
+# 检查权限和时间同步
+check_root
+setup_ntp_sync
 # 安装基础依赖
 if ! command -v curl &>/dev/null || ! command -v unzip &>/dev/null; then
     echo "安装基础依赖..."
@@ -944,21 +980,6 @@ if ! command -v curl &>/dev/null || ! command -v unzip &>/dev/null; then
         yum install -y curl unzip wget tar openssl >/dev/null 2>&1
     fi
 fi
-# ============= 新增：时间同步检查 =============
-echo "检查时间同步服务..."
-if ! command -v chronyc &>/dev/null; then
-    echo "安装 chrony 时间同步服务..."
-    if command -v apt-get &>/dev/null; then
-        apt-get install -y chrony >/dev/null 2>&1
-    elif command -v yum &>/dev/null; then
-        yum install -y chrony >/dev/null 2>&1
-    fi
-fi
-# 启动 chrony 服务
-systemctl start chrony >/dev/null 2>&1
-systemctl enable chrony >/dev/null 2>&1
-echo "✓ 时间同步服务已就绪"
-# ============================================
 
 while true; do
     clear
