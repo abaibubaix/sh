@@ -944,6 +944,21 @@ if ! command -v curl &>/dev/null || ! command -v unzip &>/dev/null; then
         yum install -y curl unzip wget tar openssl >/dev/null 2>&1
     fi
 fi
+# ============= 新增：时间同步检查 =============
+echo "检查时间同步服务..."
+if ! command -v chronyc &>/dev/null; then
+    echo "安装 chrony 时间同步服务..."
+    if command -v apt-get &>/dev/null; then
+        apt-get install -y chrony >/dev/null 2>&1
+    elif command -v yum &>/dev/null; then
+        yum install -y chrony >/dev/null 2>&1
+    fi
+fi
+# 启动 chrony 服务
+systemctl start chrony >/dev/null 2>&1
+systemctl enable chrony >/dev/null 2>&1
+echo "✓ 时间同步服务已就绪"
+# ============================================
 
 while true; do
     clear
