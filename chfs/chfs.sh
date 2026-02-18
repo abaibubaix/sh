@@ -38,7 +38,7 @@ echo "🐳 启动 CHFS 容器..."
 docker run --name chfs -d -p 88:80 \
   -v /mnt/chfs/data:/data \
   -v /mnt/chfs/chfs.ini:/config/chfs.ini \
-  docblue/chfs:v4.0beta.min
+  abai569/chfs:v4.0beta.min
 
 # 5. 查看日志确认
 echo ""
